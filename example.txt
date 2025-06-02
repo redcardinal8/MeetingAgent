@@ -1,0 +1,64 @@
+You: List my event with penglan2020@gmail.com.
+AI Agent: Here are your scheduled Cal.com meetings with Peng Lan (penglan2020@gmail.com):
+
+1. **30 Min Meeting between Justin Wu and Peng Lan**
+   - Start: 2025-06-04 at 21:00 (UTC)
+   - End: 2025-06-04 at 21:30 (UTC)
+
+2. **30 Min Meeting between Justin Wu and Peng Lan**
+   - Start: 2025-06-16 at 20:00 (UTC)
+   - End: 2025-06-16 at 20:30 (UTC)
+
+If you need any adjustments or have questions regarding these meetings, feel free to ask!
+You: Now list my events with tong.wu@gmail.com.
+AI Agent: Here are your scheduled Cal.com events with Tong Wu (tong.wu@gmail.com):
+
+1. **30 Min Meeting between Justin Wu and Tong Wu**
+   - Start: 2025-06-03 at 22:00 (UTC)
+   - End: 2025-06-03 at 22:30 (UTC)
+
+2. **30 Min Meeting between Justin Wu and Tong Wu**
+   - Start: 2025-06-09 at 16:00 (UTC)
+   - End: 2025-06-09 at 16:30 (UTC)
+
+3. **30 Min Meeting set up by JWu between Tong Wu and Justin Wu**
+   - Start: 2025-06-09 at 19:00 (UTC)
+   - End: 2025-06-09 at 19:30 (UTC)
+
+4. **30 Min Meeting between Justin Wu and Tong Wu**
+   - Start: 2025-06-10 at 16:00 (UTC)
+   - End: 2025-06-10 at 16:30 (UTC)
+
+5. **30 Min Meeting between Justin Wu and Tong Wu**
+   - Start: 2025-06-11 at 16:00 (UTC)
+   - End: 2025-06-11 at 16:30 (UTC)
+
+6. **30 Min Meeting between Justin Wu and Tong Wu**
+   - Start: 2025-06-11 at 19:00 (UTC)
+   - End: 2025-06-11 at 19:30 (UTC)
+
+7. **30 Min Meeting between Justin Wu and Tong Wu**
+   - Start: 2025-06-11 at 23:00 (UTC)
+   - End: 2025-06-11 at 23:30 (UTC)
+
+If you have any questions or need changes for these meetings, let me know!
+You: Book an meeting with penglan2020@gmail.com.
+AI Agent: To book a meeting with penglan2020@gmail.com, please provide the following details:
+
+1. **Meeting Title:** What should the meeting be called?
+2. **Participant's Name:** Confirm the name of the participant, or is it "Peng Lan"?
+3. **Meeting Date:** Which date would you like to schedule the meeting?
+4. **Start Time:** What time would you like the meeting to start?
+5. **Timezone:** What is the timezone of the participants?
+6. **Event Type ID:** What is the Cal.com Event Type ID for the meeting? (If you don't have it, I can guide you to find it)
+7. **Meeting Duration:** How long should the meeting last (in minutes)?
+8. **Language:** What language will the meeting be in?
+9. **Event Description:** Is there any specific description or note for the meeting?
+
+Once I have this information, I can proceed with scheduling the meeting!
+You: Title is "Cool meeting." Participant is Peng Lan. The date is 2025-06-03 at 2pm pst. The event id is 2569737. The meeting is 30 minutes long. The language is chinese. There is no extra description.
+[Debug Function Call] book_cal_com_meeting: eventTypeId=2569737, title=Cool meeting, date=2025-06-03, time=14:00, tz=America/Los_Angeles, duration=30
+AI Agent: Your meeting "Cool meeting" has been successfully scheduled on Cal.com for 2025-06-03 at 2:00 PM PST for 30 minutes. Event Type ID: 2569737. Cal.com Booking ID: 8255758.
+
+If you need any further adjustments or have additional questions, feel free to ask!
+You: 

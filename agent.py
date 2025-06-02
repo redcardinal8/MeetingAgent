@@ -1,13 +1,11 @@
 import os
 import json
-import requests # For making HTTP requests to Cal.com API
+import requests 
 from openai import OpenAI
 from datetime import datetime, timedelta, timezone as dt_timezone # Added timezone
 from zoneinfo import ZoneInfo # For handling timezones
 
-# --- Configuration ---
-# Ensure your OpenAI API key is set in the environment.
-# client = OpenAI() (handled by try-except block)
+
 
 # Cal.com Configuration
 CAL_COM_API_KEY = os.environ.get("CAL_COM_API_KEY") # IMPORTANT: Set this environment variable
@@ -16,7 +14,6 @@ CAL_COM_FIND_URL = "https://api.cal.com/v2"
 
 if not CAL_COM_API_KEY:
     print("WARNING: CAL_COM_API_KEY environment variable not set. Cal.com features may not work as expected.")
-    # Depending on strictness, you might exit() here if Cal.com is essential for all operations.
 
 try:
     client = OpenAI()
@@ -147,8 +144,7 @@ For retrieving events:
             return {"error": "Cal.com API key not configured. Cannot perform Cal.com operations."}
         
         url = f"{self.cal_base_url}{endpoint}"
-        # Standard headers for Cal.com API v1 often use Bearer token, but many examples show apiKey in query.
-        # Let's prioritize apiKey in query as it's explicitly mentioned in docs.
+        
         headers = {"Content-Type": "application/json"} 
         
         query_params = {"apiKey": self.cal_api_key}
@@ -159,7 +155,6 @@ For retrieving events:
             if method.upper() == "GET":
                 response = requests.get(url, headers=headers, params=query_params)
             elif method.upper() == "POST":
-                # For POST, apiKey is also expected in the query string according to Cal.com API docs
                 response = requests.post(url, headers=headers, params={"apiKey": self.cal_api_key}, json=json_data)
             else:
                 return {"error": f"Unsupported HTTP method: {method}"}
@@ -188,7 +183,6 @@ For retrieving events:
         if not self.cal_api_key:
             return {"error": "Cal.com API key not configured. Cannot perform Cal.com operations."}
         
-        # Validate API key format
         if not self.cal_api_key.startswith('cal_live_'):
             print(f"[WARNING] API key format may be incorrect. Expected format: cal_live_*")
         
@@ -204,15 +198,6 @@ For retrieving events:
         if params:
             query_params.update(params)
 
-        # Debug logging
-        print(f"\n[DEBUG] Making Cal.com API request:")
-        print(f"URL: {url}")
-        print(f"Method: {method}")
-        print(f"Headers: {headers}")
-        print(f"Query Params: {query_params}")
-        if json_data:
-            print(f"JSON Data: {json_data}")
-
         try:
             if method.upper() == "GET":
                 response = requests.get(url, headers=headers, params=query_params)
@@ -220,12 +205,6 @@ For retrieving events:
                 response = requests.post(url, headers=headers, json=json_data)
             else:
                 return {"error": f"Unsupported HTTP method: {method}"}
-            
-            # Debug logging for response
-            print(f"\n[DEBUG] Cal.com API Response:")
-            print(f"Status Code: {response.status_code}")
-            print(f"Response Headers: {response.headers}")
-            print(f"Response Body: {response.text[:500]}...")  # Print first 500 chars of response
             
             response.raise_for_status() 
             return response.json()
@@ -236,15 +215,12 @@ For retrieving events:
                 error_message += f" - {error_details}"
             except json.JSONDecodeError:
                 error_message += f" - {e.response.text}"
-            print(f"[Cal.com API Error] {error_message}")
             return {"error": error_message, "status_code": e.response.status_code, "raw_text": e.response.text}
         except requests.exceptions.RequestException as e:
             error_details = f"Request exception: {e}"
-            print(f"[Cal.com API Error] {error_details}")
             return {"error": error_details}
         except json.JSONDecodeError:
             error_details = "Failed to decode JSON response from Cal.com API."
-            print(f"[Cal.com API Error] {error_details}")
             return {"error": error_details}
 
     def _book_cal_com_meeting_impl(self, eventTypeId, responses, meeting_title, date, start, timeZone, duration_minutes, language, metadata):
@@ -254,13 +230,6 @@ For retrieving events:
              return json.dumps({"status": "failure", "message": "Cal.com API key not configured in the agent."})
 
         try:
-            #
-           # naive_dt_start = datetime.strptime(f"{date} {start}", "%Y-%m-%d %H:%M")
-           # start_iso_for_booking = naive_dt_start.isoformat() 
-            #
-            #end_dt_start = naive_dt_start + timedelta(minutes=duration_minutes)
-
-            #end_iso_for_booking = end_dt_start.isoformat()  
             user_tz = ZoneInfo(timeZone)
             localized_start = datetime.strptime(f"{date} {start}", "%Y-%m-%d %H:%M").replace(tzinfo=user_tz)
             localized_end = localized_start + timedelta(minutes=duration_minutes)
@@ -320,19 +289,12 @@ For retrieving events:
         if not self.cal_api_key:
              return json.dumps({"status": "failure", "message": "Cal.com API key not configured in the agent."})
 
-        # Pass attendeeEmail as a query parameter
         params = {
             "attendeeEmail": attendeeEmail
         }
             
-        # Debug logging before API call
-        print(f"\n[DEBUG] Retrieving meetings for email: {attendeeEmail}")
-        
         # Make sure we're using the correct endpoint
         bookings_data = self._make_cal_request_find("GET", "/bookings", params=params)
-
-        # Debug logging after API call
-        print(f"\n[DEBUG] Received bookings data: {json.dumps(bookings_data, indent=2)[:500]}...")
 
         if bookings_data and "error" not in bookings_data:
             # The response has a nested structure: status -> data -> bookings
@@ -354,7 +316,6 @@ For retrieving events:
                     })
             else:
                 error_msg = "Unexpected response format from Cal.com API"
-                print(f"[ERROR] {error_msg}: {json.dumps(bookings_data, indent=2)}")
                 return json.dumps({"status": "failure", "message": f"Failed to retrieve meetings from Cal.com: {error_msg}"})
         else:
             error_msg = "Unknown error retrieving meetings."
@@ -364,7 +325,6 @@ For retrieving events:
                      error_msg += f" (Details: {bookings_data['raw_text'][:200]})"
                  if 'status_code' in bookings_data:
                      error_msg += f" (Status Code: {bookings_data['status_code']})"
-            print(f"[ERROR] Failed to retrieve meetings: {error_msg}")  # Add error logging
             return json.dumps({"status": "failure", "message": f"Failed to retrieve meetings from Cal.com: {error_msg}"})
 
     def chat(self, user_input):
@@ -382,14 +342,13 @@ For retrieving events:
 
             try:
                 response = self.client.chat.completions.create(
-                    model="gpt-4o", # Or your preferred model
+                    model="gpt-4o", 
                     messages=self.messages,
                     tools=self.tools,
                     tool_choice="auto" 
                 )
             except Exception as e:
                 print(f"Error calling OpenAI API: {e}")
-                # Append a generic error message for the assistant to potentially relay or log
                 self.messages.append({"role": "assistant", "content": "Sorry, I encountered an error communicating with the AI service."})
                 return "Sorry, I encountered an error trying to connect to the AI service."
 
@@ -418,18 +377,11 @@ For retrieving events:
                 assistant_reply = response_message.content
                 return assistant_reply
         
-        # Fallback if max turns reached without a direct textual response
         return "Sorry, I couldn't complete your request after a few attempts. There might be an issue with repeated function calls or understanding the final step."
 
-# --- Main Interaction Loop ---
+# Main interaction
 if __name__ == "__main__":
-    if not CAL_COM_API_KEY:
-        print("--------------------------------------------------------------------")
-        print("WARNING: CAL_COM_API_KEY environment variable is not set.")
-        print("Cal.com related features (booking/showing meetings) will not work.")
-        print("Please set it if you intend to use these features.")
-        print("--------------------------------------------------------------------")
-    
+
     agent = MeetingSchedulerAgent()
     print("\nAI Agent: Hello! I can help you schedule meetings on Cal.com or view your existing ones.")
     print("AI Agent: For Cal.com actions, ensure your Cal.com API key is configured.")
