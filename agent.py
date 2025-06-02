@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo # For handling timezones
 # Cal.com Configuration
 CAL_COM_API_KEY = os.environ.get("CAL_COM_API_KEY") # IMPORTANT: Set this environment variable
 CAL_COM_BASE_URL = "https://api.cal.com/v1"
+CAL_COM_FIND_URL = "https://api.cal.com/v2"
 
 if not CAL_COM_API_KEY:
     print("WARNING: CAL_COM_API_KEY environment variable not set. Cal.com features may not work as expected.")
@@ -29,14 +30,15 @@ class MeetingSchedulerAgent:
         self.client = client
         self.cal_api_key = CAL_COM_API_KEY
         self.cal_base_url = CAL_COM_BASE_URL
+        self.cal_find_url = CAL_COM_FIND_URL
         
         self.system_prompt = {
             "role": "system",
-            "content": """Develop a chatbot that assists users in booking meetings on Cal.com and retrieving their scheduled Cal.com events.
+            "content": """You are a chatbot that assists users in booking meetings on Cal.com and retrieving their scheduled Cal.com events.
 
-The chatbot should engage users to gather necessary details:
+You should engage users to gather necessary details:
 - For booking: Meeting reason/title, participants (emails, names), desired date, time, their timezone (e.g., 'America/New_York'), the Cal.com Event Type ID, and meeting duration in minutes. The chatbot will check Cal.com for availability.
-- For retrieving events: User's email associated with Cal.com and the date for which to retrieve meetings, and their timezone.
+- For retrieving events: User's email associated with Cal.com.
 
 # Steps
 
@@ -48,9 +50,9 @@ The chatbot should engage users to gather necessary details:
    - Confirm the booking with the user and provide the event details.
 
 2. **Retrieving Scheduled Events (from Cal.com):**
-   - Ask the user for their email (associated with Cal.com), the specific date they want to check, and their timezone.
-   - Retrieve a list of meetings from Cal.com for that user and date using /bookings API (potentially after resolving email to userId via /users API).
-   - Present the list of events to the user.
+   - Ask the user for the attendee's email.
+   - Take the json of the response from the /bookings API to retrieve all scheduled events for that user and present the important fields in a nicer fashion.
+   - Create a list of these bookings.
 
 # Output Format
 
@@ -59,8 +61,8 @@ For booking a meeting:
 
 For retrieving events:
 - Provide a list: 
-  - "Scheduled Cal.com Events for [email] on [date] ([timezone]):"
-  - "[Event Title 1]: Start: [startTime] (UTC), End: [endTime] (UTC), Attendees: [names/emails]"
+  - "Scheduled Cal.com Events for [user email]:"
+  - "[Event Title 1]: Start: [startTime] (UTC), End: [endTime] (UTC)"
   - ... (Note: Cal.com returns times in UTC, inform the user or convert if possible)
 
 # Notes
@@ -126,16 +128,14 @@ For retrieving events:
                 "type": "function",
                 "function": {
                     "name": "show_cal_com_booked_meetings",
-                    "description": "Shows booked meetings from Cal.com for a given user, date, and timezone.",
+                    "description": "Shows booked meetings from Cal.com for a given user email.",
                     "strict" : True,
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "email": {"type": "string", "description": "The email of the Cal.com user whose meetings are to be retrieved."},
-                            "date": {"type": "string", "description": "The date for which to show booked meetings, in 'YYYY-MM-DD' format."},
-                            "timeZone": {"type": "string", "description": "The timezone to interpret the date correctly, e.g., 'America/New_York'."}
+                            "attendeeEmail": {"type": "string", "description": "Email of the attendee to retrieve meetings for."},
                         },
-                        "required": ["email", "date", "timeZone"],
+                        "required": ["attendeeEmail"],
                         "additionalProperties": False
                     }
                 }
@@ -183,18 +183,69 @@ For retrieving events:
             error_details = "Failed to decode JSON response from Cal.com API."
             print(f"[Cal.com API Error] {error_details}")
             return {"error": error_details}
+    
+    def _make_cal_request_find(self, method, endpoint, params=None, json_data=None):
+        if not self.cal_api_key:
+            return {"error": "Cal.com API key not configured. Cannot perform Cal.com operations."}
+        
+        # Validate API key format
+        if not self.cal_api_key.startswith('cal_live_'):
+            print(f"[WARNING] API key format may be incorrect. Expected format: cal_live_*")
+        
+        url = f"{self.cal_find_url}{endpoint}"
+        
+        # Set headers to match the working cURL request
+        headers = {
+            "Authorization": f"Bearer {self.cal_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        query_params = {}
+        if params:
+            query_params.update(params)
 
+        # Debug logging
+        print(f"\n[DEBUG] Making Cal.com API request:")
+        print(f"URL: {url}")
+        print(f"Method: {method}")
+        print(f"Headers: {headers}")
+        print(f"Query Params: {query_params}")
+        if json_data:
+            print(f"JSON Data: {json_data}")
 
-    def _get_user_id_from_email(self, email):
-        response = self._make_cal_request("GET", "/users", params={"email": email})
-        if response and "error" not in response and isinstance(response, list) and len(response) > 0:
-            # Cal.com /users?email=... returns a list of users.
-            return response[0].get("id") 
-        elif response and "error" in response:
-            print(f"Error fetching Cal.com user ID for {email}: {response['error']}")
-            return None
-        print(f"User with email {email} not found on Cal.com or error in fetching.")
-        return None
+        try:
+            if method.upper() == "GET":
+                response = requests.get(url, headers=headers, params=query_params)
+            elif method.upper() == "POST":
+                response = requests.post(url, headers=headers, json=json_data)
+            else:
+                return {"error": f"Unsupported HTTP method: {method}"}
+            
+            # Debug logging for response
+            print(f"\n[DEBUG] Cal.com API Response:")
+            print(f"Status Code: {response.status_code}")
+            print(f"Response Headers: {response.headers}")
+            print(f"Response Body: {response.text[:500]}...")  # Print first 500 chars of response
+            
+            response.raise_for_status() 
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            error_message = f"HTTP error: {e.response.status_code}"
+            try:
+                error_details = e.response.json()
+                error_message += f" - {error_details}"
+            except json.JSONDecodeError:
+                error_message += f" - {e.response.text}"
+            print(f"[Cal.com API Error] {error_message}")
+            return {"error": error_message, "status_code": e.response.status_code, "raw_text": e.response.text}
+        except requests.exceptions.RequestException as e:
+            error_details = f"Request exception: {e}"
+            print(f"[Cal.com API Error] {error_details}")
+            return {"error": error_details}
+        except json.JSONDecodeError:
+            error_details = "Failed to decode JSON response from Cal.com API."
+            print(f"[Cal.com API Error] {error_details}")
+            return {"error": error_details}
 
     def _book_cal_com_meeting_impl(self, eventTypeId, responses, meeting_title, date, start, timeZone, duration_minutes, language, metadata):
         print(f"[Debug Function Call] book_cal_com_meeting: eventTypeId={eventTypeId}, title={meeting_title}, date={date}, time={start}, tz={timeZone}, duration={duration_minutes}")
@@ -264,59 +315,56 @@ For retrieving events:
             return json.dumps({"status": "failure", "message": f"Failed to book meeting on Cal.com: {error_msg}"})
 
 
-    def _show_cal_com_booked_meetings_impl(self, email, date, timeZone): # timeZone added for context, though Cal.com API might not use it directly for filtering by userId and date
-        print(f"[Debug Function Call] show_cal_com_booked_meetings: Email={email}, Date={date}, Timezone={timeZone}")
+    def _show_cal_com_booked_meetings_impl(self, attendeeEmail): 
         
         if not self.cal_api_key:
              return json.dumps({"status": "failure", "message": "Cal.com API key not configured in the agent."})
 
-        user_id = self._get_user_id_from_email(email)
-        if not user_id:
-            return json.dumps({
-                "status": "failure",
-                "message": f"Could not find Cal.com user ID for email: {email}."
-            })
-        try:
-            datetime.strptime(date, "%Y-%m-%d") # Validate date format
-        except ValueError:
-            return json.dumps({"status": "failure", "message": "Invalid date format. Please use YYYY-MM-DD."})
-
+        # Pass attendeeEmail as a query parameter
         params = {
-            "userId": user_id,
-            "dateFrom": date, 
-            "dateTo": date    
+            "attendeeEmail": attendeeEmail
         }
             
-        bookings_data = self._make_cal_request("GET", "/bookings", params=params) # Renamed variable to avoid conflict
+        # Debug logging before API call
+        print(f"\n[DEBUG] Retrieving meetings for email: {attendeeEmail}")
+        
+        # Make sure we're using the correct endpoint
+        bookings_data = self._make_cal_request_find("GET", "/bookings", params=params)
 
-        if bookings_data and "error" not in bookings_data and isinstance(bookings_data, list): # Cal.com returns a list for /bookings
-            if not bookings_data: # Empty list means no bookings
-                return json.dumps({
-                    "status": "success",
-                    "message": f"No meetings found on Cal.com for {email} (User ID: {user_id}) on {date}.",
-                    "events": []
-                })
-            
-            formatted_events = []
-            for booking in bookings_data:
-                attendees_list = booking.get("attendees", [])
-                attendees_info = ", ".join([att.get("name", att.get("email")) for att in attendees_list if att]) if attendees_list else "N/A"
-                
-                formatted_events.append(
-                    f"'{booking.get('title', 'N/A')}': Start: {booking.get('startTime')} (UTC), End: {booking.get('endTime')} (UTC), Attendees: {attendees_info}, Cal.com Booking ID: {booking.get('id')}"
-                )
-            
-            return json.dumps({
-                "status": "success",
-                "message": f"Scheduled Cal.com Events for {email} (User ID: {user_id}) on {date} (timezone context: {timeZone}):",
-                "events": formatted_events
-            })
+        # Debug logging after API call
+        print(f"\n[DEBUG] Received bookings data: {json.dumps(bookings_data, indent=2)[:500]}...")
+
+        if bookings_data and "error" not in bookings_data:
+            # The response has a nested structure: status -> data -> bookings
+            if isinstance(bookings_data, dict) and bookings_data.get('status') == 'success':
+                data = bookings_data.get('data', {})
+                if isinstance(data, dict) and 'bookings' in data:
+                    bookings_list = data['bookings']
+                    if not bookings_list: # Empty list means no bookings
+                        return json.dumps({
+                            "status": "success",
+                            "message": f"No meetings found for {attendeeEmail}.",
+                            "events": []
+                        })
+                    
+                    return json.dumps({
+                        "status": "success",
+                        "message": f"Scheduled Cal.com Events for {attendeeEmail}:",
+                        "events": bookings_list
+                    })
+            else:
+                error_msg = "Unexpected response format from Cal.com API"
+                print(f"[ERROR] {error_msg}: {json.dumps(bookings_data, indent=2)}")
+                return json.dumps({"status": "failure", "message": f"Failed to retrieve meetings from Cal.com: {error_msg}"})
         else:
             error_msg = "Unknown error retrieving meetings."
             if bookings_data and isinstance(bookings_data, dict): # Error responses are often dicts
                  error_msg = bookings_data.get('error', error_msg)
                  if 'raw_text' in bookings_data:
                      error_msg += f" (Details: {bookings_data['raw_text'][:200]})"
+                 if 'status_code' in bookings_data:
+                     error_msg += f" (Status Code: {bookings_data['status_code']})"
+            print(f"[ERROR] Failed to retrieve meetings: {error_msg}")  # Add error logging
             return json.dumps({"status": "failure", "message": f"Failed to retrieve meetings from Cal.com: {error_msg}"})
 
     def chat(self, user_input):
