@@ -36,6 +36,7 @@ class MeetingSchedulerAgent:
 You should engage users to gather necessary details:
 - For booking: Meeting reason/title, participants (emails, names), desired date, time, their timezone (e.g., 'America/New_York'), the Cal.com Event Type ID, and meeting duration in minutes. The chatbot will check Cal.com for availability.
 - For retrieving events: User's email associated with Cal.com.
+- For cancelling meetings: User's email, meeting date and time, and reason for cancellation (optional).
 
 # Steps
 
@@ -51,6 +52,11 @@ You should engage users to gather necessary details:
    - Take the json of the response from the /bookings API to retrieve all scheduled events for that user and present the important fields in a nicer fashion.
    - Create a list of these bookings.
 
+3. **Cancelling a Meeting:**
+   - Ask the user for their email, the reason why they want to cancel the meeting (if user doesn't give reason leave a blank string), and the time and date of the meeting they want to cancel. 
+   - Retrieve the booking UID using the /bookings API.
+   - Use the /bookings/{id} API to cancel the meeting.
+
 # Output Format
 
 For booking a meeting:
@@ -58,9 +64,13 @@ For booking a meeting:
 
 For retrieving events:
 - Provide a list: 
-  - "Scheduled Cal.com Events for [user email]:"
-  - "[Event Title 1]: Start: [startTime] (UTC), End: [endTime] (UTC)"
+  - "Scheduled Cal.com Events for [email] on [date] ([timezone]):"
+  - "[Event Title 1]: Start: [startTime] (UTC), End: [endTime] (UTC), Attendees: [names/emails]"
   - ... (Note: Cal.com returns times in UTC, inform the user or convert if possible)
+
+For cancelling a meeting:
+- Confirm with: "Your meeting '[title]' scheduled for [date] at [time] has been successfully cancelled."
+- If the meeting cannot be found or cancelled, inform the user with the specific reason.
 
 # Notes
 - Always ask for and use timezones for accurate scheduling.
@@ -136,6 +146,26 @@ For retrieving events:
                         "additionalProperties": False
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "cancel_cal_com_meeting",
+                    "description": "Cancels a meeting on Cal.com for a specific date and time.",
+                    "strict": True,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "attendeeEmail": {"type": "string", "description": "Email of the attendee whose meeting is to be cancelled."},
+                            "date": {"type": "string", "description": "Date of the meeting to cancel in YYYY-MM-DD format."},
+                            "start": {"type": "string", "description": "Start time of the meeting to cancel in HH:MM format (24-hour)."},
+                            "timeZone": {"type": "string", "description": "The timezone for the specified date and time, e.g., 'Europe/Berlin'."},
+                            "reason": {"type": "string", "description": "Reason for cancelling the meeting (optional)."}
+                        },
+                        "required": ["attendeeEmail", "date", "start", "timeZone", "reason"],
+                        "additionalProperties": False
+                    }
+                }
             }
         ]
 
@@ -156,6 +186,8 @@ For retrieving events:
                 response = requests.get(url, headers=headers, params=query_params)
             elif method.upper() == "POST":
                 response = requests.post(url, headers=headers, params={"apiKey": self.cal_api_key}, json=json_data)
+            elif method.upper() == "DELETE":
+                response = requests.delete(url, headers=headers, params={"apiKey": self.cal_api_key}, json=json_data)
             else:
                 return {"error": f"Unsupported HTTP method: {method}"}
             
@@ -327,6 +359,61 @@ For retrieving events:
                      error_msg += f" (Status Code: {bookings_data['status_code']})"
             return json.dumps({"status": "failure", "message": f"Failed to retrieve meetings from Cal.com: {error_msg}"})
 
+    def _cancel_cal_com_meeting_impl(self, attendeeEmail, date, start, timeZone, reason=""):
+        if not self.cal_api_key:
+            return json.dumps({"status": "failure", "message": "Cal.com API key not configured in the agent."})
+
+        try:
+            # First, get all bookings for the user
+            params = {
+                "attendeeEmail": attendeeEmail
+            }
+            bookings_data = self._make_cal_request_find("GET", "/bookings", params=params)
+
+            if not bookings_data or "error" in bookings_data:
+                return json.dumps({"status": "failure", "message": "Failed to retrieve bookings to find the meeting to cancel."})
+
+            # Find the booking that matches the date and time
+            target_booking = None
+            user_tz = ZoneInfo(timeZone)
+            target_time = datetime.strptime(f"{date} {start}", "%Y-%m-%d %H:%M").replace(tzinfo=user_tz)
+            
+            if isinstance(bookings_data, dict) and bookings_data.get('status') == 'success':
+                data = bookings_data.get('data', {})
+                if isinstance(data, dict) and 'bookings' in data:
+                    for booking in data['bookings']:
+                        booking_time = datetime.fromisoformat(booking['startTime'].replace('Z', '+00:00'))
+                        if booking_time.astimezone(user_tz) == target_time:
+                            target_booking = booking
+                            break
+
+            if not target_booking:
+                return json.dumps({"status": "failure", "message": f"No meeting found for {attendeeEmail} on {date} at {start} {timeZone}."})
+
+            # Cancel the booking using DELETE method
+            booking_id = target_booking['id']
+            cancel_payload = {
+                "reason": reason
+            }
+            
+            # Use DELETE method instead of POST
+            cancel_response = self._make_cal_request("DELETE", f"/bookings/{booking_id}", json_data=cancel_payload)
+
+            if cancel_response and "error" not in cancel_response:
+                return json.dumps({
+                    "status": "success",
+                    "message": f"Successfully cancelled meeting '{target_booking['title']}' scheduled for {date} at {start} {timeZone}.",
+                    "booking_details": target_booking
+                })
+            else:
+                error_msg = "Unknown error during cancellation."
+                if cancel_response and isinstance(cancel_response, dict):
+                    error_msg = cancel_response.get('message', cancel_response.get('error', error_msg))
+                return json.dumps({"status": "failure", "message": f"Failed to cancel meeting: {error_msg}"})
+
+        except Exception as e:
+            return json.dumps({"status": "failure", "message": f"Error processing cancellation request: {str(e)}"})
+
     def chat(self, user_input):
         self.messages.append({"role": "user", "content": user_input})
         
@@ -335,7 +422,7 @@ For retrieving events:
 
         while turn_count < MAX_TURNS:
             turn_count += 1
-            if not self.cal_api_key and any(intent in user_input.lower() for intent in ["book", "show", "meeting", "schedule", "cal.com"]):
+            if not self.cal_api_key and any(intent in user_input.lower() for intent in ["book", "show", "meeting", "schedule", "cal.com", "cancel"]):
                 no_key_message = "I can't perform Cal.com operations because the Cal.com API key is not configured. Please ask the administrator to set it up."
                 self.messages.append({"role": "assistant", "content": no_key_message})
                 return no_key_message
@@ -363,6 +450,8 @@ For retrieving events:
                         function_response_content = self._book_cal_com_meeting_impl(**function_args)
                     elif function_name == "show_cal_com_booked_meetings":
                         function_response_content = self._show_cal_com_booked_meetings_impl(**function_args)
+                    elif function_name == "cancel_cal_com_meeting":
+                        function_response_content = self._cancel_cal_com_meeting_impl(**function_args)
                     else:
                         print(f"[Error] Unknown function called: {function_name}")
                         function_response_content = json.dumps({"status": "error", "message": f"Unknown function: {function_name}"})
@@ -387,6 +476,7 @@ if __name__ == "__main__":
     print("AI Agent: For Cal.com actions, ensure your Cal.com API key is configured.")
     print("AI Agent: To book, I'll generally need: Event Type ID, date, time, timezone, duration, title, participant details, and the description of the meeting.")
     print("AI Agent: To view meetings, I'll need your Cal.com email, the date, and your timezone context.")
+    print("AI Agent: To cancel a meeting, please provide the date, time, timezone, and reason (optional).")
     print("--------------------------------------------------------------------")
 
 
